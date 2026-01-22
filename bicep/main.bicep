@@ -4,18 +4,19 @@
 
 param location string = resourceGroup().location
 param avdResourceLocation string = 'northeurope'
+param secondaryLocation string = 'swedencentral'
+param subnetName string = 'avd-subnet'
 param agentUpdate object = {
       maintenanceWindow: {
         dayOfWeek: 'Sunday'
         hour: '3'
-      }
+      } 
       maintenanceWindowTimeZone: 'Romance Standard Time'
       type: 'Default'
       useSessionHostLocalTime: true
     }
 @description('Entra ID Group Object ID for AVD users - grants access to the desktop and VM login')
 param avdUserGroupId string
-param secondaryLocation string = 'swedencentral'
 param resourcePrefix string = 'avd'
 param vnetAddressPrefix string = '10.0.0.0/16'
 param subnetAddressPrefix string = '10.0.0.0/24'
@@ -34,6 +35,9 @@ param existingVnetName string = ''
 @minLength(2)
 @maxLength(2)
 param deploymentNumber string = '01'
+
+// Compute subnet ID based on VNet scenario
+var subnetId = vnetExists ? resourceId('Microsoft.Network/virtualNetworks/subnets', existingVnetName, subnetName) : '${resourceId('Microsoft.Network/virtualNetworks', '${resourcePrefix}-vnet')}/subnets/${subnetName}'
 
 resource existingVnet 'Microsoft.Network/virtualNetworks@2025-01-01' existing = if (vnetExists) {
   name: existingVnetName
@@ -90,7 +94,7 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2025-01-01' = {
 
 resource subnet 'Microsoft.Network/virtualNetworks/subnets@2025-01-01' = if (vnetExists) {
   parent: existingVnet
-  name: 'avd-subnet'
+  name: subnetName
   properties: {
     addressPrefix: subnetAddressPrefix
     networkSecurityGroup: {
@@ -109,7 +113,7 @@ resource vnet 'Microsoft.Network/virtualNetworks@2025-01-01' = if (!vnetExists) 
     }
     subnets: [
       {
-        name: 'avd-subnet'
+        name: subnetName
         properties: {
           addressPrefix: subnetAddressPrefix
           networkSecurityGroup: {
@@ -159,6 +163,12 @@ resource profileStorage 'Microsoft.Storage/storageAccounts@2025-06-01' = {
     azureFilesIdentityBasedAuthentication: {
       directoryServiceOptions: 'AADKERB'
     }
+    networkAcls: {
+      bypass: 'AzureServices'
+      virtualNetworkRules: []
+      ipRules: []
+      defaultAction: 'Allow'
+    }
     supportsHttpsTrafficOnly: true
     minimumTlsVersion: 'TLS1_2'
   }
@@ -168,7 +178,33 @@ resource profileStorage 'Microsoft.Storage/storageAccounts@2025-06-01' = {
 resource profileShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2025-06-01' = {
   name: '${profileStorage.name}/default/profiles'
   properties: {
-    shareQuota: 2048
+    shareQuota: 10240
+  }
+}
+
+// RBAC: Session hosts need elevated permissions to create and manage profile containers
+resource profileStorageVMRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for i in range(0, numberOfVMs): {
+  name: guid(profileStorage.id, sessionHost[i].id, 'a7264617-510b-434b-a828-9731dc254ea7')
+  scope: profileStorage
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a7264617-510b-434b-a828-9731dc254ea7') // Storage File Data SMB Share Elevated Contributor
+    principalId: sessionHost[i].identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+  dependsOn: [
+    sessionHost[i]
+  ]
+}]
+
+// RBAC: End users need standard contributor access to read/write their profiles
+// FSLogix enforces NTFS ACLs to prevent cross-user access
+resource profileStorageUserRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(profileStorage.id, avdUserGroupId, '0c867c2a-1d8c-454a-a3db-ab2ea1bdc8bb')
+  scope: profileStorage
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0c867c2a-1d8c-454a-a3db-ab2ea1bdc8bb') // Storage File Data SMB Share Contributor
+    principalId: avdUserGroupId
+    principalType: 'Group'
   }
 }
 
@@ -182,7 +218,7 @@ resource nic 'Microsoft.Network/networkInterfaces@2025-01-01' = [for i in range(
         name: 'ipconfig1'
         properties: {
           subnet: {
-            id: vnet.properties.subnets[0].id
+            id: subnetId
           }
           privateIPAllocationMethod: 'Dynamic'
         }
@@ -370,8 +406,8 @@ output workspaceName string = workspace.name
 output appGroupName string = appGroup.name
 output appGroupId string = appGroup.id
 output sessionHostNames array = [for i in range(0, numberOfVMs): sessionHost[i].name]
-output vnetId string = vnet.id
-output subnetId string = vnetExists ? vnet.properties.subnets[0].id : subnet.id
+output vnetId string = vnetExists ? existingVnet.id : vnet.id
+output subnetId string = subnetId
 output msixStorageAccountName string = storageAccount.name
 output msixFileShareName string = 'msix-packages'
 output msixFileSharePath string = '\\\\${storageAccount.name}.file.${environment().suffixes.storage}\\msix-packages'

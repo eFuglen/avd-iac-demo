@@ -9,7 +9,7 @@ param(
     [string]$Location = "denmarkeast",
     
     [Parameter(Mandatory = $false)]
-    [string]$ParameterFile = "parameters\main.bicepparam",
+    [string]$ParameterFile = "..\parameters\main.bicepparam",
     
     [Parameter(Mandatory = $false)]
     [SecureString]$AdminPassword,
@@ -38,11 +38,16 @@ function Start-Deployment {
     param($plainPassword)
     
     $deploymentName = "avd-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+    $templateFile = Join-Path (Split-Path $PSScriptRoot -Parent) "bicep\main.bicep"
+    
     Write-Info "Starting deployment: $deploymentName"
+    Write-Info "Template: $templateFile"
+    Write-Info "Parameters: $ParameterFile"
     
     $args = @("deployment", "group", "create",
               "--resource-group", $ResourceGroup,
               "--name", $deploymentName,
+              "--template-file", $templateFile,
               "--parameters", $ParameterFile,
               "--output", "json")
 
