@@ -1,19 +1,41 @@
-# Starter pipeline
-# Start with a minimal pipeline that you can customize to build and deploy your code.
-# Add steps that build, run tests, deploy, and more:
-# https://aka.ms/yaml
+# Azure Virtual Desktop Infrastructure as Code Deployment Pipeline
 
 trigger:
 - main
 
 pool:
-  vmImage: ubuntu-latest
+  vmImage: 'windows-latest'
+
+variables:
+  resourceGroup: 'rg-avd-prod'
+  location: 'denmarkeast'
+  azureSubscription: '3krCloud Sub DevOps'
 
 steps:
-- script: echo Hello, world!
-  displayName: 'Run a one-line script'
+- task: AzureCLI@2
+  displayName: 'Deploy AVD Infrastructure'
+  inputs:
+    azureSubscription: '$(azureSubscription)'
+    scriptType: 'pscore'
+    scriptLocation: 'scriptPath'
+    scriptPath: '$(System.DefaultWorkingDirectory)/scripts/Deploy-AVD.ps1'
+    arguments: '-ResourceGroup $(resourceGroup) -Location $(location) -ParameterFile "$(System.DefaultWorkingDirectory)/parameters/main.bicepparam" -WhatIf'
+    addSpnToEnvironment: true
+    workingDirectory: '$(System.DefaultWorkingDirectory)'
+  env:
+    ADMIN_PASSWORD: $(vmAdminPassword)  # Store as secret variable in pipeline
 
-- script: |
-    echo Add other tasks to build, test, and deploy your project.
-    echo See https://aka.ms/yaml
-  displayName: 'Run a multi-line script'
+# Uncomment below for actual deployment (remove -WhatIf)
+# - task: AzureCLI@2
+#   displayName: 'Deploy AVD Infrastructure (Actual)'
+#   condition: eq(variables['Build.SourceBranch'], 'refs/heads/main')
+#   inputs:
+#     azureSubscription: '$(azureSubscription)'
+#     scriptType: 'pscore'
+#     scriptLocation: 'scriptPath'
+#     scriptPath: '$(System.DefaultWorkingDirectory)/scripts/Deploy-AVD.ps1'
+#     arguments: '-ResourceGroup $(resourceGroup) -Location $(location) -ParameterFile "$(System.DefaultWorkingDirectory)/parameters/main.bicepparam"'
+#     addSpnToEnvironment: true
+#     workingDirectory: '$(System.DefaultWorkingDirectory)'
+#   env:
+#     ADMIN_PASSWORD: $(vmAdminPassword)
