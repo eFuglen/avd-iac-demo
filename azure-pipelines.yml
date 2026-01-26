@@ -1,41 +1,57 @@
 # Azure Virtual Desktop Infrastructure as Code Deployment Pipeline
 
 trigger:
-- main
+  - main
 
 pool:
-  vmImage: 'windows-latest'
+  vmImage: "windows-latest"
 
 variables:
-  resourceGroup: 'rg-avd-prod'
-  location: 'denmarkeast'
-  azureSubscription: '3krCloud Sub DevOps'
+  - name: resourceGroup
+    value: "rg-avd-prod"
+  - name: location
+    value: "denmarkeast"
+  - name: azureSubscription
+    value: "3krCloud Sub DevOps"
+  - group: "AVD-Params-and-Secrets"
 
-steps:
-- task: AzureCLI@2
-  displayName: 'Deploy AVD Infrastructure'
-  inputs:
-    azureSubscription: '$(azureSubscription)'
-    scriptType: 'pscore'
-    scriptLocation: 'scriptPath'
-    scriptPath: '$(System.DefaultWorkingDirectory)/scripts/Deploy-AVD.ps1'
-    arguments: '-ResourceGroup $(resourceGroup) -Location $(location) -ParameterFile "$(System.DefaultWorkingDirectory)/parameters/main.bicepparam" -WhatIf'
-    addSpnToEnvironment: true
-    workingDirectory: '$(System.DefaultWorkingDirectory)'
-  env:
-    ADMIN_PASSWORD: $(vmAdminPassword)  # Store as secret variable in pipeline
+stages:
+  - stage: Validate
+    displayName: "Validate Deployment"
+    jobs:
+      - job: WhatIfDeployment
+        displayName: "Run What-If Deployment"
+        steps:
+          - task: AzureCLI@2
+            displayName: "Deploy AVD Infrastructure"
+            inputs:
+              azureSubscription: "$(azureSubscription)"
+              scriptType: "pscore"
+              scriptLocation: "scriptPath"
+              scriptPath: "$(System.DefaultWorkingDirectory)/scripts/Deploy-AVD.ps1"
+              arguments: '-ResourceGroup $(resourceGroup) -Location $(location) -ParameterFile "$(System.DefaultWorkingDirectory)/parameters/main.bicepparam" -WhatIf'
+              addSpnToEnvironment: true
+              workingDirectory: "$(System.DefaultWorkingDirectory)"
+            env:
+              ADMIN_PASSWORD: $(vmAdminPassword)
 
-# Uncomment below for actual deployment (remove -WhatIf)
-# - task: AzureCLI@2
-#   displayName: 'Deploy AVD Infrastructure (Actual)'
-#   condition: eq(variables['Build.SourceBranch'], 'refs/heads/main')
-#   inputs:
-#     azureSubscription: '$(azureSubscription)'
-#     scriptType: 'pscore'
-#     scriptLocation: 'scriptPath'
-#     scriptPath: '$(System.DefaultWorkingDirectory)/scripts/Deploy-AVD.ps1'
-#     arguments: '-ResourceGroup $(resourceGroup) -Location $(location) -ParameterFile "$(System.DefaultWorkingDirectory)/parameters/main.bicepparam"'
-#     addSpnToEnvironment: true
-#     workingDirectory: '$(System.DefaultWorkingDirectory)'
-#   env:
-#     ADMIN_PASSWORD: $(vmAdminPassword)
+  - stage: Deploy
+    displayName: "Deploy to Production"
+    dependsOn: Validate
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - job: ActualDeployment
+        displayName: "Run Actual Deployment"
+        steps:
+          - task: AzureCLI@2
+            displayName: "Deploy AVD Infrastructure"
+            inputs:
+              azureSubscription: "$(azureSubscription)"
+              scriptType: "pscore"
+              scriptLocation: "scriptPath"
+              scriptPath: "$(System.DefaultWorkingDirectory)/scripts/Deploy-AVD.ps1"
+              arguments: '-ResourceGroup $(resourceGroup) -Location $(location) -ParameterFile "$(System.DefaultWorkingDirectory)/parameters/main.bicepparam"'
+              addSpnToEnvironment: true
+              workingDirectory: "$(System.DefaultWorkingDirectory)"
+            env:
+              ADMIN_PASSWORD: $(vmAdminPassword)
