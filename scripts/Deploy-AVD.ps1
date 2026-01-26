@@ -45,11 +45,11 @@ function Start-Deployment {
     Write-Info "Parameters: $ParameterFile"
     
     $args = @("deployment", "group", "create",
-              "--resource-group", $ResourceGroup,
-              "--name", $deploymentName,
-              "--template-file", $templateFile,
-              "--parameters", $ParameterFile,
-              "--output", "json")
+        "--resource-group", $ResourceGroup,
+        "--name", $deploymentName,
+        "--template-file", $templateFile,
+        "--parameters", $ParameterFile,
+        "--output", "json")
 
     if ($plainPassword) { $args += @("--parameters", "adminPassword=$plainPassword") }
     if ($WhatIf) { $args += "--what-if" }
@@ -127,13 +127,23 @@ try {
     
     # Get/prompt for password
     $plainPassword = $null
-    if ($AdminPassword) {
+    if ($env:ADMIN_PASSWORD) {
+        Write-Info "Using password from environment variable"
+        $plainPassword = $env:ADMIN_PASSWORD
+    }
+    elseif ($AdminPassword) {
+        Write-Info "Using password from parameter"
         $plainPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
             [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($AdminPassword))
-    } elseif (-not $WhatIf) {
+    }
+    elseif (-not $WhatIf -and -not $env:AGENT_ID) {
+        Write-Info "Prompting for password interactively"
         $AdminPassword = Read-Host "Enter VM admin password" -AsSecureString
         $plainPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
             [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($AdminPassword))
+    }
+    elseif (-not $WhatIf) {
+        throw "Admin password is required for deployment. Set ADMIN_PASSWORD environment variable or use -AdminPassword parameter."
     }
     
     # Deploy
@@ -156,7 +166,8 @@ try {
         
         if ($groupId -and $groupId -ne 'YOUR_ENTRA_ID_GROUP_OBJECT_ID_HERE') {
             Set-AppGroupAssignment -appGroupId $result.properties.outputs.appGroupId.value -groupId $groupId
-        } else {
+        }
+        else {
             Write-Warn "avdUserGroupId not configured - skipping group assignment"
         }
     }
@@ -176,7 +187,8 @@ try {
     
     Write-Info "Deployment completed successfully!"
     
-} catch {
+}
+catch {
     Write-Host "`n[ERROR] $_" -ForegroundColor Red | Out-Host
     exit 1
 }
