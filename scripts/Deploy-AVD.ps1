@@ -23,8 +23,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-function Write-Info($msg) { Write-Host "[INFO] $msg" -ForegroundColor Green }
-function Write-Warn($msg) { Write-Host "[WARN] $msg" -ForegroundColor Yellow }
+function Write-Info($msg) { Write-Host "[INFO] $msg" -ForegroundColor Green | Out-Host }
+function Write-Warn($msg) { Write-Host "[WARN] $msg" -ForegroundColor Yellow | Out-Host }
 
 # Helper to extract parameter value from bicepparam file
 function Get-ParamValue {
@@ -56,7 +56,12 @@ function Start-Deployment {
 
     $result = az @args
     if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Deployment failed: $result" | Out-Host
         throw "Deployment failed with exit code $LASTEXITCODE"
+    }
+
+    if ($WhatIf) {
+        return @{ properties = @{ provisioningState = "WhatIf" } }
     }
     
     return ($result | ConvertFrom-Json)
@@ -91,11 +96,11 @@ function Test-VMExtensions {
     
     foreach ($vm in $vms) {
         $exts = az vm extension list --resource-group $rgName --vm-name $vm --query "[].{name:name,state:provisioningState}" -o json | ConvertFrom-Json
-        Write-Host "  VM: $vm" -ForegroundColor Cyan
+        Write-Host "  VM: $vm" -ForegroundColor Cyan | Out-Host
         foreach ($ext in $exts) {
             $icon = if ($ext.state -eq "Succeeded") { "✅" } else { "❌" }
             $color = if ($ext.state -eq "Succeeded") { "Green" } else { "Red" }
-            Write-Host "    $icon $($ext.name): $($ext.state)" -ForegroundColor $color
+            Write-Host "    $icon $($ext.name): $($ext.state)" -ForegroundColor $color | Out-Host
         }
     }
 }
@@ -105,7 +110,7 @@ function Test-VMExtensions {
 # ============================================
 
 try {
-    Write-Host "`n=== Azure Virtual Desktop Deployment ===" -ForegroundColor Blue
+    Write-Host "`n=== Azure Virtual Desktop Deployment ===" -ForegroundColor Blue | Out-Host
     
     # Prerequisites
     if (-not (Get-Command "az" -ErrorAction SilentlyContinue)) { throw "Azure CLI not installed" }
@@ -117,7 +122,7 @@ try {
     # Ensure resource group exists
     if ((az group exists --name $ResourceGroup) -eq 'false') {
         Write-Info "Creating resource group: $ResourceGroup"
-        az group create --name $ResourceGroup --location $Location -o none
+        az group create --name $ResourceGroup --location $Location -o none 2>&1 | Out-Null
     }
     
     # Get/prompt for password
@@ -160,18 +165,18 @@ try {
     Write-Host "`n=== Deployment Outputs ===" -ForegroundColor Cyan
     if ($result.properties.outputs) {
         $result.properties.outputs.PSObject.Properties | ForEach-Object {
-            Write-Host "  $($_.Name): $($_.Value.value)"
+            Write-Host "  $($_.Name): $($_.Value.value)" | Out-Host
         }
     }
     
-    Write-Host "`n=== Next Steps ===" -ForegroundColor Cyan
-    Write-Host "  1. Configure FSLogix in Intune"
-    Write-Host "  2. Verify user access in Azure Portal"
-    Write-Host "  3. Test connections via AVD client"
+    Write-Host "`n=== Next Steps ===" -ForegroundColor Cyan | Out-Host
+    Write-Host "  1. Configure FSLogix in Intune" | Out-Host
+    Write-Host "  2. Verify user access in Azure Portal" | Out-Host
+    Write-Host "  3. Test connections via AVD client" | Out-Host
     
     Write-Info "Deployment completed successfully!"
     
 } catch {
-    Write-Host "`n[ERROR] $_" -ForegroundColor Red
+    Write-Host "`n[ERROR] $_" -ForegroundColor Red | Out-Host
     exit 1
 }
