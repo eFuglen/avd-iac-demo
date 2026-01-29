@@ -27,6 +27,9 @@ This solution deploys a complete AVD environment with:
 ✅ Log Analytics integration for monitoring  
 ✅ RBAC automation (VM login, storage access, desktop users)  
 ✅ Configurable deployment numbers to avoid device name conflicts  
+✅ Flexible parameter overrides for pipeline and script-based deployments  
+
+> **Note**: This solution uses the latest Azure API versions, including preview APIs for cutting-edge AVD features. All API versions are validated and production-ready as of January 2026.
 
 ## Prerequisites
 
@@ -38,10 +41,13 @@ This solution deploys a complete AVD environment with:
 ## Repository Structure
 
 ```
+├── azure-pipelines.yml         # Azure DevOps CI/CD pipeline
 ├── bicep/
 │   ├── main.bicep              # Main deployment template
 │   └── modules/
 │       └── hostPool.bicep      # Host pool with registration token
+├── docs/
+│   └── FSLogix-Intune-Configuration.md  # FSLogix setup guide
 ├── parameters/
 │   └── main.bicepparam         # Parameter file
 └── scripts/
@@ -57,15 +63,18 @@ This solution deploys a complete AVD environment with:
 Edit [parameters/main.bicepparam](parameters/main.bicepparam):
 
 ```bicep
-param location = 'denmarkeast'              // VM location
+param location = 'denmarkeast'              // VM and storage location
 param avdResourceLocation = 'northeurope'   // AVD metadata location
+param secondaryLocation = 'swedencentral'   // Log Analytics location
 param resourcePrefix = 'myavd'              // Resource naming prefix
 param adminUsername = 'avdadmin'
-param adminPassword = 'ChangeMe!P@ssw0rd'  // Use secure password
+param adminPassword = 'ChangeMe!P@ssw0rd'  // Use secure method in production
 param numberOfVMs = 2
 param vmSize = 'Standard_D4s_v5'
 param deploymentNumber = '01'               // Increment for fresh deployments
 param avdUserGroupId = 'your-group-id'      // Entra ID group object ID
+param vnetExists = false                    // Set to true to use existing VNet
+param existingVnetName = ''                 // Name of existing VNet if vnetExists = true
 ```
 
 ### 2. Deploy with Azure CLI
@@ -82,13 +91,72 @@ az deployment group create \
 ### 3. Deploy with PowerShell
 
 ```powershell
+# Basic deployment
 .\scripts\Deploy-AVD.ps1 `
   -ResourceGroup "rg-avd-demo" `
   -ParameterFile "parameters\main.bicepparam" `
   -AdminPassword (ConvertTo-SecureString "YourPassword123!" -AsPlainText -Force)
+
+# Validation run (no changes made)
+.\scripts\Deploy-AVD.ps1 -ResourceGroup "rg-avd-test" -WhatIf
+
+# Using environment variable for password
+$env:ADMIN_PASSWORD = "YourSecurePassword123!"
+.\scripts\Deploy-AVD.ps1 -ResourceGroup "rg-avd-demo"
+
+# Override parameters dynamically (without editing parameter file)
+.\scripts\Deploy-AVD.ps1 `
+  -ResourceGroup "rg-avd-demo" `
+  -AdminPassword (ConvertTo-SecureString "Pass123!" -AsPlainText -Force) `
+  -AdditionalParameters @{
+    numberOfVMs = 3
+    vmSize = 'Standard_D8s_v5'
+    avdUserGroupId = 'different-group-id'
+  }
 ```
 
+### 4. Deploy with Azure Pipelines
+
+This repository includes an [azure-pipelines.yml](azure-pipelines.yml) for CI/CD deployment:
+
+**Pipeline Features:**
+- Two-stage deployment (Validate → Deploy)
+- What-If validation on every run
+- Automatic deployment to production on main branch
+- Secure password management via Azure DevOps variable groups
+
+**Setup:**
+1. Create a variable group named `AVD-Params-and-Secrets` with:
+   - `vmAdminPassword` (secret)
+   - `avdUserGroupId` (group object ID)
+2. Create an Azure service connection (e.g., `3krCloud Sub DevOps`)
+3. Update the `azureSubscription` variable in the pipeline
+4. Import the pipeline and run
+
+The pipeline automatically validates changes and deploys to production when merging to main.
+
 ## Configuration Details
+
+### Deployment Script Options
+
+The `Deploy-AVD.ps1` script supports the following parameters:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `ResourceGroup` | string | Yes | Target resource group name |
+| `Location` | string | No | Azure region (default: denmarkeast) |
+| `ParameterFile` | string | No | Path to bicepparam file (default: ../parameters/main.bicepparam) |
+| `AdminPassword` | SecureString | No | VM admin password (can also use `ADMIN_PASSWORD` env var) |
+| `WhatIf` | switch | No | Validate deployment without making changes |
+| `SkipGroupAssignment` | switch | No | Skip automatic RBAC group assignment to app group |
+| `AdditionalParameters` | hashtable | No | Override any Bicep parameters without editing parameter file |
+
+**Key Features:**
+- Automatic resource group creation if it doesn't exist
+- Password management via parameter, environment variable, or interactive prompt
+- Post-deployment validation (checks VM extensions status)
+- Automatic RBAC assignment for user groups
+- Detailed deployment output logging
 
 ### Deployment Number Strategy
 
