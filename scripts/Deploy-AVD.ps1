@@ -18,7 +18,11 @@ param(
     [switch]$WhatIf,
     
     [Parameter(Mandatory = $false)]
-    [switch]$SkipGroupAssignment
+    [switch]$SkipGroupAssignment,
+
+    [Parameter(Mandatory = $false)]
+    [hashtable]$AdditionalParameters = @{}
+    
 )
 
 $ErrorActionPreference = 'Stop'
@@ -44,17 +48,27 @@ function Start-Deployment {
     Write-Info "Template: $templateFile"
     Write-Info "Parameters: $ParameterFile"
     
-    $args = @("deployment", "group", "create",
+    $arguments = @("deployment", "group", "create",
         "--resource-group", $ResourceGroup,
         "--name", $deploymentName,
         "--template-file", $templateFile,
         "--parameters", $ParameterFile,
         "--output", "json")
 
-    if ($plainPassword) { $args += @("--parameters", "adminPassword=$plainPassword") }
-    if ($WhatIf) { $args += "--what-if" }
+    if ($plainPassword) { $arguments += @("--parameters", "adminPassword=$plainPassword") }
 
-    $result = az @args
+        if ($AdditionalParameters.Count -gt 0) {
+        Write-Info "Adding $($AdditionalParameters.Count) additional parameter(s)"
+        foreach ($key in $AdditionalParameters.Keys) {
+            $value = $AdditionalParameters[$key]
+            Write-Info "  - $key = $value"
+            $arguments += @("--parameters", "$key=$value")
+        }
+    }
+
+    if ($WhatIf) { $arguments += "--what-if" }
+
+    $result = az @arguments
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] Deployment failed: $result" | Out-Host
         throw "Deployment failed with exit code $LASTEXITCODE"
