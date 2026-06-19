@@ -1,0 +1,96 @@
+# GitHub Actions equivalent of azure-pipelines.yml
+# Replaces Azure DevOps variable group "AVD-Params-and-Secrets" with GitHub Secrets & Variables.
+#
+# ┌───────────────────────────────────────────────────────────────────┐
+# │  REQUIRED SETUP (one-time)                                       │
+# │                                                                  │
+# │  1. AZURE OIDC FEDERATION (replaces ADO service connection)      │
+# │     a) Create an Entra ID App Registration (or use existing SP)  │
+# │     b) Add a Federated Credential:                               │
+# │        - Issuer: https://token.actions.githubusercontent.com     │
+# │        - Subject: repo:eFuglen/avd-iac-demo:ref:refs/heads/main │
+# │        - Audience: api://AzureADTokenExchange                   │
+# │     c) Grant the SP "Contributor" + "User Access Administrator"  │
+# │        on the target subscription/resource group                 │
+# │                                                                  │
+# │  2. GITHUB SECRETS  (Settings → Secrets → Actions)              │
+# │     AZURE_CLIENT_ID       – App Registration (client) ID        │
+# │     AZURE_TENANT_ID       – Entra ID tenant ID                  │
+# │     AZURE_SUBSCRIPTION_ID – Target Azure subscription ID        │
+# │     VM_ADMIN_PASSWORD     – Was "vmAdminPassword" in ADO library │
+# │                                                                  │
+# │  3. GITHUB VARIABLES  (Settings → Variables → Actions)          │
+# │     AVD_USER_GROUP_ID     – Was "avdUserGroupId" in ADO library  │
+# │     RESOURCE_GROUP        – Default: rg-avd-prod                 │
+# │     LOCATION              – Default: denmarkeast                 │
+# └───────────────────────────────────────────────────────────────────┘
+
+name: Deploy AVD Infrastructure
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # Required for OIDC federated login
+  contents: read
+
+env:
+  RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP || 'rg-avd-prod' }}
+  LOCATION: ${{ vars.LOCATION || 'denmarkeast' }}
+
+jobs:
+  validate:
+    name: Validate (What-If)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Run What-If Deployment
+        shell: pwsh
+        run: |
+          ./scripts/Deploy-AVD.ps1 `
+            -ResourceGroup "${{ env.RESOURCE_GROUP }}" `
+            -Location "${{ env.LOCATION }}" `
+            -ParameterFile "${{ github.workspace }}/parameters/main.bicepparam" `
+            -AdditionalParameters @{ avdUserGroupId = "${{ vars.AVD_USER_GROUP_ID }}" } `
+            -WhatIf
+        env:
+          ADMIN_PASSWORD: ${{ secrets.VM_ADMIN_PASSWORD }}
+
+  deploy:
+    name: Deploy to Production
+    needs: validate
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: windows-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy AVD Infrastructure
+        shell: pwsh
+        run: |
+          ./scripts/Deploy-AVD.ps1 `
+            -ResourceGroup "${{ env.RESOURCE_GROUP }}" `
+            -Location "${{ env.LOCATION }}" `
+            -ParameterFile "${{ github.workspace }}/parameters/main.bicepparam" `
+            -AdditionalParameters @{ avdUserGroupId = "${{ vars.AVD_USER_GROUP_ID }}" }
+        env:
+          ADMIN_PASSWORD: ${{ secrets.VM_ADMIN_PASSWORD }}
